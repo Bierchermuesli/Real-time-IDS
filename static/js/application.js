@@ -45,12 +45,25 @@ $(document).ready(function(){
 
     //receive details from server
     socket.on('newresult', function(msg) {
-        console.log("Received result" + msg.result);
-        //maintain a list of ten messages
-        if (messages_received.length >= 10){
-            messages_received.shift()
-        }            
+        console.log("Received Flow: " + msg.result[0]);
+        //maintain a list of n messages
+        if (messages_received.length >= 10) {
+            // Find the index of the element with the lowest value at property 11
+            let lowestIndex = 0;
+            let lowestValue = messages_received[0][11];
+    
+            for (let i = 1; i < messages_received.length; i++) {
+                if (messages_received[i][11] < lowestValue) {
+                    lowestValue = messages_received[i][11];
+                    lowestIndex = i;
+                }
+            }
+    
+            // Remove the element with the lowest value
+            messages_received.splice(lowestIndex, 1);
+        }
         messages_received.push(msg.result);
+
         messages_string = '<tr><th>Flow ID</th><th>Src IP</th><th>Src Port</th><th>Dst IP</th><th>Dst Port</th><th>Protocol</th><th>Flow start time</th><th>Flow last seen</th><th>App name</th><th>PID</th><th>Prediction</th><th>Prob</th><th>Risk</th></tr>';
 
         for (var i = messages_received.length-1 ; i >= 0; i--){
@@ -60,7 +73,7 @@ $(document).ready(function(){
             }
             messages_string = messages_string+ '<td> <a href="/flow-detail?flow_id='+messages_received[i][0].toString()+'"><div>Detail</div></a></td>' + '</tr>';
 
-        }
+        }  
         $('#details').html(messages_string);
 
         // var i = 0;
@@ -77,12 +90,17 @@ $(document).ready(function(){
            }
            
                myChart.update();
-
         myChart.update();
 
 
     });
 
+    socket.on('stats', function(msg) {
+        $('#stats').html(`Packets: ${msg.packets}<br/>Flows Active: ${msg.flows_active}<br/>Flow done: ${msg.flows}`);
+    });
+    socket.on('sessions', function(msg) {
+        $('#sessions').html(msg.current_flows);
+    });    
 });
 
 

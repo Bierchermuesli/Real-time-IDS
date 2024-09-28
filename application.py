@@ -24,7 +24,9 @@ from scipy.stats import norm
 import ipaddress
 from urllib.request import urlopen
 
-from tensorflow import keras
+import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
+import keras
 
 from lime import lime_tabular
 
@@ -59,7 +61,7 @@ app.config['SECRET_KEY'] = 'secret!'
 app.config['DEBUG'] = True
 
 #turn the flask app into a socketio app
-socketio = SocketIO(app, async_mode=None, logger=True, engineio_logger=True)
+socketio = SocketIO(app, async_mode=None, logger=False, engineio_logger=False)
 
 #random result Generator Thread
 thread = Thread()
@@ -165,13 +167,14 @@ ae_features = np.array(['FlowDuration',
 'IdleMin'])
 
 flow_count = 0
+packet_count = 0
 flow_df = pd.DataFrame(columns =cols)
 
 
 src_ip_dict = {}
 
 current_flows = {}
-FlowTimeout = 600
+FlowTimeout = 300
 
 #load models
 # with open('models/scaler.pkl', 'rb') as f:
@@ -194,17 +197,15 @@ def classify(features):
     record = features.copy()
     features = [np.nan if x in [np.inf, -np.inf] else float(x) for x in features[:39]]
     
-
-    if feature_string[0] in src_ip_dict.keys():
-        src_ip_dict[feature_string[0]] +=1
-    else:
-        src_ip_dict[feature_string[0]] = 1
+    # preffer public ip's in the statistics
+    ip = feature_string[0] if ipaddress.ip_address(feature_string[0]).is_global else feature_string[2]
+    src_ip_dict[ip] = src_ip_dict.get(ip, 0) + 1
 
     for i in [0,2]:
         ip = feature_string[i] #feature_string[0] is src, [2] is dst
-        if not ipaddress.ip_address(ip).is_private:
+        if ipaddress.ip_address(ip).is_global and not ipaddress.ip_address(ip).is_multicast:
             country = ipInfo(ip)
-            if country is not None and country not in  ['ano', 'unknown']:
+            if country and country not in  ['ano', 'unknown']:
                 img = ' <img src="static/images/blank.gif" class="flag flag-' + country.lower() + '" title="' + country + '">'
             else:
                 img = ' <img src="static/images/blank.gif" class="flag flag-unknown" title="UNKNOWN">'
@@ -236,17 +237,18 @@ def classify(features):
         print(feature_string + classification + proba_score )
 
     flow_count +=1
-    w.writerow(['Flow #'+str(flow_count)] )
-    w.writerow(['Flow info:']+feature_string)
-    w.writerow(['Flow features:']+features)
-    w.writerow(['Prediction:']+classification+ proba_score)
-    w.writerow(['--------------------------------------------------------------------------------------------------'])
+    if proba_score[0] > 1:
+        w.writerow(['Flow #'+str(flow_count)] )
+        w.writerow(['Flow info:']+feature_string)
+        w.writerow(['Flow features:']+features)
+        w.writerow(['Prediction:']+classification+ proba_score)
+        w.writerow(['--------------------------------------------------------------------------------------------------'])
 
-    w2.writerow(['Flow #'+str(flow_count)] )
-    w2.writerow(['Flow info:']+features)
-    w2.writerow(['--------------------------------------------------------------------------------------------------'])
+        w2.writerow(['Flow #'+str(flow_count)] )
+        w2.writerow(['Flow info:']+features)
+        w2.writerow(['--------------------------------------------------------------------------------------------------'])
+
     flow_df.loc[len(flow_df)] = [flow_count]+ record + classification + proba_score + risk
-
 
     ip_data = {'SourceIP': src_ip_dict.keys(), 'count': src_ip_dict.values()} 
     ip_data= pd.DataFrame(ip_data)
@@ -262,7 +264,10 @@ def classify(features):
     return [flow_count]+ record + classification+ proba_score + risk
 
 def newPacket(p):
+    global packet_count, flow_count
     try:
+        packet_count +=1
+        socketio.emit('stats', {'packets': packet_count,'flows': flow_count,'flows_active': len(current_flows)}, namespace='/test')
         packet = PacketInfo()
         packet.setDest(p)
         packet.setSrc(p)
@@ -331,6 +336,8 @@ def newPacket(p):
             flow = Flow(packet)
             current_flows[packet.getFwdID()] = flow
             # current flows put id, (new) flow
+            flow_string = '\n'.join([f"{key}" for key in current_flows])
+            socketio.emit('sessions', {'current_flows': flow_string}, namespace='/test')            
 
     except AttributeError:
         # not IP or TCP
