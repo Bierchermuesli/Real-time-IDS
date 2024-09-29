@@ -17,6 +17,8 @@ dill = "==0.3.6"
 tensorflow = "==2.11.0"
 plotly = "==5.13.0"
 werkzeug = "==2.2.2"
+numpy = "<2.0.0"
+
 
 [dev-packages]
 
